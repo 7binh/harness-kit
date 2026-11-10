@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fix: the write guard let stray documents through when the project was reached through a symlinked path (for example macOS `/var` → `/private/var`).
+- Fix: `npm test` on Node 22.
+
 ## 0.2.0
 
 Additions for large projects.

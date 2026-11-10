@@ -10,8 +10,8 @@
 //   doctor [--staged]   check the installation and look for stray workflow documents
 //   guard               hook mode: reject a workflow document created outside <dir>
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const kitDir = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +41,20 @@ const logAbs = join(wfAbs, 'log');
 const PLACEHOLDER = '(not filled in)';
 
 const slash = (p) => p.replace(/\\/g, '/');
+// realpath that also works for a file that does not exist yet: resolve the nearest existing parent.
+function realPath(p) {
+  let existing = p;
+  const rest = [];
+  while (!existsSync(existing) && dirname(existing) !== existing) {
+    rest.unshift(basename(existing));
+    existing = dirname(existing);
+  }
+  try {
+    return join(realpathSync.native(existing), ...rest);
+  } catch {
+    return p;
+  }
+}
 const read = (abs) => {
   try {
     return readFileSync(abs, 'utf8');
@@ -401,7 +415,8 @@ function guard() {
 
   const abs = resolve(payload.cwd || root, filePath);
   if (existsSync(abs)) process.exit(0); // editing an existing file is never blocked
-  const rel = slash(relative(root, abs));
+  // Compare real paths: the project may be reached through a symlink (macOS /var -> /private/var).
+  const rel = slash(relative(realPath(root), realPath(abs)));
   if (!isStrayPath(rel)) process.exit(0);
 
   const { name: active } = activeFeature();
