@@ -2,7 +2,7 @@
 // harness-kit installer. Zero dependencies, Node 18+.
 //   npx github:7binh/harness-kit init [--dir workflow] [--agents claude,gemini] [--force]
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,6 +28,13 @@ Usage
   harness-kit log [text]         add a session log entry, or show recent ones
   harness-kit check              run the project's quality checks
   harness-kit doctor             check the installation, find stray documents
+  harness-kit uninstall          remove the kit and return the project to how it was before init
+                                 (lists what it would do; add --yes to do it)
+
+Options for uninstall
+  --yes, -y          actually make the changes (without it, nothing is touched)
+  --purge            also delete everything in the workflow folder, including your own documents
+  --dir <path>       the workflow folder, if it can no longer be detected
 
 Options for init
   --dir <path>       workflow folder, relative to the project root (default: workflow)
@@ -44,6 +51,8 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === '--force') opts.force = true;
     else if (a === '--git-hook') opts.gitHook = true;
+    else if (a === '--yes' || a === '-y') opts.yes = true;
+    else if (a === '--purge') opts.purge = true;
     else if (a === '-h' || a === '--help') opts.help = true;
     else if (a === '-v' || a === '--version') opts.version = true;
     else if (a === '--dir' || a === '--agents') opts[a.slice(2)] = argv[++i];
@@ -254,6 +263,135 @@ Next
 `);
 }
 
+// ---------------------------------------------------------------- uninstall
+const SKILLS = ['onboard', 'flow', 'catchup', 'handoff'];
+
+// Remove the managed block; returns the remaining text, or null when there is no block.
+function stripBlock(text) {
+  const start = text.indexOf(START);
+  const end = text.indexOf(END);
+  if (start === -1 || end < start) return null;
+  const before = text.slice(0, start).trimEnd();
+  const after = text.slice(end + END.length).trimStart();
+  const joined = [before, after].filter(Boolean).join('\n\n');
+  return joined ? `${joined}\n` : '';
+}
+
+function pruneEmptyDirs(abs) {
+  if (!existsSync(abs) || !statSync(abs).isDirectory()) return;
+  for (const name of readdirSync(abs)) pruneEmptyDirs(join(abs, name));
+  if (!readdirSync(abs).length) rmdirSync(abs);
+}
+
+function uninstall(opts) {
+  const root = process.cwd();
+  const dir = (opts.dir || findInstalledDir(root)).replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
+  if (!dir || dir.startsWith('/') || dir.includes('..') || /^[a-zA-Z]:/.test(dir)) {
+    fail('Cannot find the harness-kit workflow folder here. If it is not "workflow", pass it: harness-kit uninstall --dir <folder>');
+  }
+  const fill = (text) => text.replaceAll('{{DIR}}', dir);
+  const steps = [];
+  const kept = [];
+  const step = (text, run) => steps.push({ text, run });
+
+  // Skills (kit-owned names).
+  for (const base of ['.agents/skills', '.claude/skills']) {
+    for (const name of SKILLS) {
+      const rel = `${base}/${name}`;
+      if (existsSync(join(root, rel))) step(`delete ${rel}/`, () => rmSync(join(root, rel), { recursive: true, force: true }));
+    }
+  }
+
+  // Managed blocks. A file that held nothing but the block is deleted; any other file keeps its own text.
+  for (const file of ['AGENTS.md', 'CLAUDE.md', 'GEMINI.md']) {
+    const abs = join(root, file);
+    if (!existsSync(abs)) continue;
+    const stripped = stripBlock(readFileSync(abs, 'utf8'));
+    if (stripped === null) continue;
+    const onlyOurs = !stripped.trim() || (file === 'AGENTS.md' && stripped.trim() === '# Agent Instructions');
+    if (onlyOurs) step(`delete ${file} (it held only the harness-kit block)`, () => rmSync(abs));
+    else step(`remove the harness-kit block from ${file} (the rest is kept)`, () => writeFileSync(abs, stripped));
+  }
+
+  // Claude Code hooks.
+  const settingsRel = '.claude/settings.json';
+  const settingsAbs = join(root, settingsRel);
+  if (existsSync(settingsAbs)) {
+    let settings = null;
+    try {
+      settings = JSON.parse(readFileSync(settingsAbs, 'utf8'));
+    } catch {
+      /* not valid JSON: leave it alone */
+    }
+    if (settings?.hooks && JSON.stringify(settings.hooks).includes('.kit/kit.mjs')) {
+      for (const [event, list] of Object.entries(settings.hooks)) {
+        const left = (Array.isArray(list) ? list : []).filter((e) => !JSON.stringify(e).includes('.kit/kit.mjs'));
+        if (left.length) settings.hooks[event] = left;
+        else delete settings.hooks[event];
+      }
+      if (!Object.keys(settings.hooks).length) delete settings.hooks;
+      if (!Object.keys(settings).length) step(`delete ${settingsRel} (it held only harness-kit hooks)`, () => rmSync(settingsAbs));
+      else step(`remove the harness-kit hooks from ${settingsRel} (the rest is kept)`, () => writeFileSync(settingsAbs, JSON.stringify(settings, null, 2) + '\n'));
+    }
+  }
+
+  // Git pre-commit hook.
+  try {
+    const hooksDir = execFileSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const abs = resolve(root, hooksDir, 'pre-commit');
+    if (existsSync(abs) && readFileSync(abs, 'utf8').includes('.kit/kit.mjs')) {
+      const left = readFileSync(abs, 'utf8').split(/\r?\n/).filter((l) => !l.includes('.kit/kit.mjs') && !l.startsWith('# harness-kit:'));
+      if (left.every((l) => !l.trim() || l.trim() === '#!/bin/sh')) step('delete the git pre-commit hook (it held only the harness-kit check)', () => rmSync(abs));
+      else step('remove the harness-kit line from the git pre-commit hook (the rest is kept)', () => writeFileSync(abs, left.join('\n')));
+    }
+  } catch {
+    /* not a git repository */
+  }
+
+  // The workflow folder.
+  const wfAbs = join(root, dir);
+  if (existsSync(wfAbs)) {
+    if (opts.purge) {
+      step(`delete ${dir}/ and everything in it (--purge)`, () => rmSync(wfAbs, { recursive: true, force: true }));
+    } else {
+      step(`delete ${dir}/.kit/`, () => rmSync(join(wfAbs, '.kit'), { recursive: true, force: true }));
+      for (const rel of walk(wfAbs)) {
+        const p = rel.replace(/\\/g, '/');
+        if (p.startsWith('.kit/')) continue;
+        const current = readFileSync(join(wfAbs, rel), 'utf8').replace(/\r\n/g, '\n');
+        const template = join(templateRoot, 'workflow', rel);
+        const pristine = existsSync(template) ? fill(readFileSync(template, 'utf8')).replace(/\r\n/g, '\n') === current : p.endsWith('.gitkeep') && current === '';
+        if (pristine) step(`delete ${dir}/${p} (unchanged from the template)`, () => rmSync(join(wfAbs, rel)));
+        else kept.push(`${dir}/${p}`);
+      }
+      step(`delete empty folders in ${dir}/`, () => pruneEmptyDirs(wfAbs));
+    }
+  }
+  step('delete empty .agents/ and .claude/ folders', () => {
+    for (const rel of ['.agents/skills', '.agents', '.claude/skills', '.claude']) {
+      const abs = join(root, rel);
+      if (existsSync(abs) && statSync(abs).isDirectory() && !readdirSync(abs).length) rmdirSync(abs);
+    }
+  });
+
+  if (!opts.yes) {
+    console.log('harness-kit uninstall: nothing has been changed yet. It would:\n');
+    steps.forEach((s) => console.log(`  - ${s.text}`));
+  } else {
+    steps.forEach((s) => {
+      s.run();
+      console.log(`  done  ${s.text}`);
+    });
+  }
+  if (kept.length) {
+    console.log(`\n${opts.yes ? 'Kept' : 'Would keep'} ${kept.length} file(s) you or your agents wrote:`);
+    kept.slice(0, 15).forEach((f) => console.log(`  ${f}`));
+    if (kept.length > 15) console.log(`  ... and ${kept.length - 15} more`);
+    console.log('Delete them as well with --purge.');
+  }
+  console.log(opts.yes ? '\nDone. The project no longer uses harness-kit. Review with: git status' : '\nRun the same command with --yes to apply. Nothing is deleted without it.');
+}
+
 function delegate(command, args) {
   const root = process.cwd();
   const dir = findInstalledDir(root);
@@ -272,5 +410,6 @@ if (RUNTIME.includes(process.argv[2])) {
   if (opts.version) console.log(version);
   else if (opts.help || !command) console.log(HELP);
   else if (command === 'init' || command === 'update') init(opts);
+  else if (command === 'uninstall' || command === 'remove') uninstall(opts);
   else fail(`Unknown command: ${command}\n\n${HELP}`);
 }

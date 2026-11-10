@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -235,4 +235,45 @@ test('doctor finds stray folders; --git-hook blocks committing stray documents',
   write(cwd, 'workflow/notes/idea.md', '# fine\n');
   git(cwd, 'add', 'workflow');
   assert.equal(kit(cwd, 'workflow', ['doctor', '--staged']).status, 0);
+});
+
+test('uninstall returns the project to how it was before init, and keeps your documents', () => {
+  const cwd = freshRepo();
+  const settings = { enabledPlugins: { x: true }, hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo hi' }] }] } };
+  write(cwd, 'AGENTS.md', '# Mine\n\nKeep this line.\n');
+  write(cwd, 'CLAUDE.md', '# Claude notes\n\n@AGENTS.md\n');
+  write(cwd, '.claude/settings.json', JSON.stringify(settings, null, 2) + '\n');
+  run(cwd, ['init', '--git-hook']);
+  run(cwd, ['new', 'demo']);
+  assert.ok(existsSync(join(cwd, '.git/hooks/pre-commit')));
+
+  const dry = run(cwd, ['uninstall']);
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /nothing has been changed yet[\s\S]*--yes/);
+  assert.ok(existsSync(join(cwd, 'workflow/.kit/kit.mjs')), 'a dry run touches nothing');
+  assert.ok(existsSync(join(cwd, '.agents/skills/flow')));
+
+  const real = run(cwd, ['uninstall', '--yes']);
+  assert.equal(real.status, 0, real.stdout + real.stderr);
+  assert.equal(read(cwd, 'AGENTS.md').trim(), '# Mine\n\nKeep this line.');
+  assert.equal(read(cwd, 'CLAUDE.md').trim(), '# Claude notes\n\n@AGENTS.md');
+  assert.deepEqual(JSON.parse(read(cwd, '.claude/settings.json')), settings);
+  for (const gone of ['GEMINI.md', '.agents', '.claude/skills', '.git/hooks/pre-commit', 'workflow/.kit', 'workflow/STATE.md', 'workflow/templates', 'workflow/notes']) {
+    assert.ok(!existsSync(join(cwd, gone)), `${gone} should be gone`);
+  }
+  assert.ok(existsSync(join(cwd, 'workflow/features/001-demo/spec.md')), 'documents written for a feature stay');
+  assert.match(real.stdout, /Kept \d+ file/);
+
+  const purge = run(cwd, ['uninstall', '--yes', '--purge', '--dir', 'workflow']);
+  assert.equal(purge.status, 0, purge.stdout + purge.stderr);
+  assert.ok(!existsSync(join(cwd, 'workflow')));
+});
+
+test('uninstall --purge on a fresh install leaves nothing behind', () => {
+  const cwd = fresh();
+  run(cwd, ['init', '--agents', 'all']);
+  const r = run(cwd, ['uninstall', '--yes', '--purge']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(readdirSync(cwd), []);
+  assert.notEqual(run(cwd, ['uninstall']).status, 0, 'nothing installed: it says so');
 });

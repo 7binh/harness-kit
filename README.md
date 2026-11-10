@@ -168,7 +168,22 @@ git mv specs/003-trip-sharing workflow/features/003-trip-sharing
 
 ## Uninstall
 
-Delete the workflow folder's `.kit/`, the four skill folders under `.agents/skills/` and `.claude/skills/`, the harness-kit blocks in `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`, the two hook entries that mention `.kit/kit.mjs` in `.claude/settings.json`, and the line in `.git/hooks/pre-commit` if you added it. Keep `workflow/` itself: it is your project history.
+```bash
+npx github:7binh/harness-kit uninstall          # lists what it would do; changes nothing
+npx github:7binh/harness-kit uninstall --yes    # does it
+```
+
+It returns the project to how it was before `init`:
+
+- The four skills are deleted from `.agents/skills/` and `.claude/skills/`.
+- The harness-kit block is removed from `AGENTS.md`, `CLAUDE.md`, and `GEMINI.md`. A file that held nothing else is deleted; any other file keeps its own text.
+- The harness-kit hooks are removed from `.claude/settings.json`, and the line from the git pre-commit hook. Your own hooks stay.
+- `workflow/.kit/` is deleted, and so is every file in `workflow/` that is still identical to the template.
+- **Files you or your agents wrote are kept**: feature specs and plans, the session log, and any `STATE.md`, `PROJECT.md`, `ROADMAP.md`, `DECISIONS.md` you edited. They are your project history.
+
+Add `--purge` to delete the whole workflow folder, your documents included. Without `--yes`, nothing is touched. Review the result with `git status`; a commit can be reverted if it was not what you wanted.
+
+If `workflow/` is not the folder name and the kit can no longer detect it, pass `--dir <folder>`.
 
 ## Development
 

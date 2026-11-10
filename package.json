@@ -1,6 +1,6 @@
 {
   "name": "harness-kit",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "One workflow folder and one set of rules for every AI coding agent: Claude Code, Codex, Cursor, Antigravity, OpenCode, Gemini CLI.",
   "type": "module",
   "bin": {

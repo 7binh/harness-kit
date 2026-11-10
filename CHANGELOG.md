@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- **`uninstall`**: returns the project to how it was before `init`. Lists the changes by default; `--yes` applies them; `--purge` also deletes the workflow folder. Removes the skills, the managed blocks, the hooks, and untouched template files; keeps documents you or your agents wrote.
+
 ## 0.2.1
 
 - Fix: the write guard let stray documents through when the project was reached through a symlinked path (for example macOS `/var` → `/private/var`).

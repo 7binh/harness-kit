@@ -153,6 +153,25 @@ Lưu ý:
 - run: node workflow/.kit/kit.mjs check    # lỗi khi một lệnh kiểm tra thất bại
 ```
 
+## Gỡ cài đặt
+
+```bash
+npx github:7binh/harness-kit uninstall          # chỉ liệt kê việc sẽ làm, không đổi gì
+npx github:7binh/harness-kit uninstall --yes    # thực hiện
+```
+
+Lệnh đưa dự án về trạng thái trước khi `init`:
+
+- Bốn skill bị xoá khỏi `.agents/skills/` và `.claude/skills/`.
+- Khối harness-kit bị gỡ khỏi `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`. File nào chỉ chứa khối đó thì bị xoá; file khác giữ nguyên phần của bạn.
+- Hook của harness-kit bị gỡ khỏi `.claude/settings.json` và dòng trong git pre-commit. Hook của bạn vẫn còn.
+- `workflow/.kit/` bị xoá, cùng mọi file trong `workflow/` còn y nguyên như template.
+- **File bạn hoặc agent đã viết được giữ lại**: spec, plan của các feature, nhật ký phiên, và `STATE.md`, `PROJECT.md`, `ROADMAP.md`, `DECISIONS.md` nếu đã sửa. Đó là lịch sử dự án.
+
+Thêm `--purge` để xoá cả thư mục workflow, kể cả tài liệu của bạn. Không có `--yes` thì không có gì bị đụng tới. Xem kết quả bằng `git status`.
+
+Nếu thư mục không tên `workflow` và kit không tự nhận ra nữa, thêm `--dir <thư mục>`.
+
 ## Đưa vào dự án đã có sẵn
 
 `init` không di chuyển file của bạn. Nếu đã có spec ở chỗ khác, `doctor` sẽ liệt kê và in lệnh để chuyển, ví dụ:
