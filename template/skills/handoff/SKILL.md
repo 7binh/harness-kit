@@ -17,6 +17,8 @@ Goal: a fresh agent that reads only the repository can pick up exactly where thi
    - `Not verified`: checks that were skipped or failed, with the key line of the failing output.
    - Set `Last updated` to today's date.
 4. **Check the claims**: every "passes" in `STATE.md` must come from a command run in this session. Otherwise move it under `Not verified`.
-5. **Stray documents**: run `node {{DIR}}/.kit/kit.mjs doctor`. Move any working document it finds outside `{{DIR}}/` into the feature folder.
-6. **Commit**: include `{{DIR}}/` in the commit of the work it describes. If the work is not ready to commit, leave the files modified and say so. Commit only when the user asks.
-7. Tell the user what was saved, in three lines or fewer, and that `catchup` resumes it.
+5. **Project knowledge**: if this session taught you something every later session needs (a command trap, an enforced rule, a missing context map row), add it to `{{DIR}}/PROJECT.md`. If the queue of work changed, update `{{DIR}}/ROADMAP.md`.
+6. **Stray documents**: run `node {{DIR}}/.kit/kit.mjs doctor`. Move any working document it finds outside `{{DIR}}/` into the feature folder.
+7. **Session log**: run `node {{DIR}}/.kit/kit.mjs log --agent "<your tool, e.g. claude-code, codex, cursor>" "<two or three sentences: what was done and what is left>"`. The script adds the time, branch, feature, stage, and the commits since the last entry. Do not edit files under `{{DIR}}/log/` by hand.
+8. **Commit**: include `{{DIR}}/` in the commit of the work it describes. If the work is not ready to commit, leave the files modified and say so. Commit only when the user asks.
+9. Tell the user what was saved, in three lines or fewer, and that `catchup` resumes it.

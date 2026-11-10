@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // harness-kit installer. Zero dependencies, Node 18+.
 //   npx github:7binh/harness-kit init [--dir workflow] [--agents claude,gemini] [--force]
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,12 +23,17 @@ Usage
   harness-kit init [options]     install into the current project (safe to re-run; also updates)
   harness-kit status             where the project stands
   harness-kit new <slug>         start the next feature
+  harness-kit use <name>         switch the active feature
+  harness-kit list               every feature with its stage and progress
+  harness-kit log [text]         add a session log entry, or show recent ones
+  harness-kit check              run the project's quality checks
   harness-kit doctor             check the installation, find stray documents
 
 Options for init
   --dir <path>       workflow folder, relative to the project root (default: workflow)
   --agents <list>    extra adapters: claude, gemini, all, none (default: all)
-  --force            also overwrite STATE.md, DECISIONS.md, README.md and the templates
+  --git-hook         add a git pre-commit check that rejects stray workflow documents (works in every tool)
+  --force            also overwrite the files you own (STATE, DECISIONS, PROJECT, ROADMAP, README, templates)
   -h, --help         show this help
   -v, --version      show the version
 `;
@@ -38,6 +43,7 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--force') opts.force = true;
+    else if (a === '--git-hook') opts.gitHook = true;
     else if (a === '-h' || a === '--help') opts.help = true;
     else if (a === '-v' || a === '--version') opts.version = true;
     else if (a === '--dir' || a === '--agents') opts[a.slice(2)] = argv[++i];
@@ -90,27 +96,52 @@ function findInstalledDir(root) {
 }
 
 // Insert or replace the managed block, leaving the rest of the file alone.
-function upsertBlock(existing, block) {
+function upsertBlock(existing, block, heading = '# Agent Instructions\n\n') {
   const start = existing.indexOf(START);
   const end = existing.indexOf(END);
   if (start !== -1 && end > start) {
     return existing.slice(0, start) + block.trimEnd() + existing.slice(end + END.length);
   }
-  if (!existing.trim()) return `# Agent Instructions\n\n${block.trimEnd()}\n`;
+  if (!existing.trim()) return `${heading}${block.trimEnd()}\n`;
   return `${existing.trimEnd()}\n\n${block.trimEnd()}\n`;
 }
 
-// CLAUDE.md / GEMINI.md: make sure the file imports AGENTS.md, without touching what is there.
-function ensureImport(root, file) {
+// CLAUDE.md / GEMINI.md: a managed block of imports, so these tools load the rules, the project
+// knowledge and the current state into every session. Imports the file already has are not repeated.
+function ensureImports(root, file, dir, prefix) {
   const abs = join(root, file);
-  if (!existsSync(abs)) {
-    writeFileSync(abs, '@AGENTS.md\n');
-    return note('created', file);
+  const text = existsSync(abs) ? readFileSync(abs, 'utf8') : '';
+  const start = text.indexOf(START);
+  const end = text.indexOf(END);
+  const outside = start !== -1 && end > start ? text.slice(0, start) + text.slice(end + END.length) : text;
+  const present = outside.split(/\r?\n/).map((l) => l.trim().replace(/^@\.\//, '@'));
+  const lines = ['AGENTS.md', `${dir}/PROJECT.md`, `${dir}/STATE.md`].filter((p) => !present.includes(`@${p}`)).map((p) => `@${prefix}${p}`);
+  const block = `${START} (managed by harness-kit init) -->\n${lines.join('\n')}\n${END}`;
+  writeFile(root, file, upsertBlock(text, block, ''), { overwrite: true });
+}
+
+// Opt-in git pre-commit check. Tool-independent: it runs whichever agent made the commit.
+function installGitHook(root, dir) {
+  let hooksDir = '';
+  try {
+    hooksDir = execFileSync('git', ['rev-parse', '--git-path', 'hooks'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return note('SKIPPED', 'git pre-commit hook (not a git repository)');
   }
-  const text = readFileSync(abs, 'utf8');
-  if (/@(\.\/)?AGENTS\.md/.test(text)) return note('unchanged', file);
-  writeFileSync(abs, `${text.trimEnd()}\n\n@AGENTS.md\n`);
-  note('updated', file);
+  const abs = resolve(root, hooksDir, 'pre-commit');
+  const line = `node ${dir}/.kit/kit.mjs doctor --staged || exit 1`;
+  if (existsSync(abs)) {
+    if (readFileSync(abs, 'utf8').includes('.kit/kit.mjs')) return note('unchanged', 'git pre-commit hook');
+    return note('SKIPPED', `git pre-commit hook already exists; add this line to it: ${line}`);
+  }
+  mkdirSync(dirname(abs), { recursive: true });
+  writeFileSync(abs, `#!/bin/sh\n# harness-kit: keep workflow documents inside ${dir}/\n${line}\n`);
+  try {
+    chmodSync(abs, 0o755);
+  } catch {
+    /* not needed on Windows */
+  }
+  note('created', 'git pre-commit hook');
 }
 
 function installClaudeHooks(root, dir) {
@@ -127,7 +158,7 @@ function installClaudeHooks(root, dir) {
   const before = JSON.stringify(settings);
   settings.hooks ??= {};
   const wanted = {
-    SessionStart: { hooks: [{ type: 'command', command: `node ${dir}/.kit/kit.mjs status`, timeout: 15 }] },
+    SessionStart: { hooks: [{ type: 'command', command: `node ${dir}/.kit/kit.mjs status --hook`, timeout: 15 }] },
     PreToolUse: {
       matcher: 'Write|Edit|MultiEdit',
       hooks: [{ type: 'command', command: `node ${dir}/.kit/kit.mjs guard`, timeout: 10 }],
@@ -179,6 +210,7 @@ function init(opts) {
     /* first install */
   }
   config = {
+    checks: [],
     strayDirs: ['specs', 'plans', 'docs/specs', 'docs/plans', 'docs/superpowers', '.specify/specs'],
     artifactNames: ['spec.md', 'plan.md', 'tasks.md', 'research.md', 'prd.md'],
     ...config,
@@ -187,6 +219,7 @@ function init(opts) {
     agents,
   };
   writeFile(root, join(dir, '.kit', 'config.json'), JSON.stringify(config, null, 2) + '\n', { overwrite: true });
+  writeFile(root, join(dir, '.kit', '.gitignore'), 'events.jsonl\n', { overwrite: true });
 
   // 3. AGENTS.md: the one file every tool reads.
   const agentsPath = join(root, 'AGENTS.md');
@@ -202,19 +235,22 @@ function init(opts) {
 
   // 5. Adapters.
   if (agents.includes('claude')) {
-    ensureImport(root, 'CLAUDE.md');
+    ensureImports(root, 'CLAUDE.md', dir, '');
     installClaudeHooks(root, dir);
   }
-  if (agents.includes('gemini')) ensureImport(root, 'GEMINI.md');
+  if (agents.includes('gemini')) ensureImports(root, 'GEMINI.md', dir, './');
+  if (opts.gitHook) installGitHook(root, dir);
 
   console.log(`harness-kit ${version} installed in ${root}\n`);
   console.log(log.join('\n'));
   console.log(`
 Next
-  1. Read ${dir}/README.md.
-  2. Open your agent and ask for "catchup" to fill in ${dir}/STATE.md.
-  3. Describe a feature and ask for "flow".
+  1. Open your agent in this folder and ask for "onboard". It studies the codebase and
+     fills in ${dir}/PROJECT.md, the context map, and the quality checks.
+  2. Describe a feature and ask for "flow".
+  3. Before you stop, ask for "handoff". Next time, ask for "catchup".
   4. Commit AGENTS.md and ${dir}/ so the memory travels with the repository.
+  Guide: ${dir}/README.md
 `);
 }
 
@@ -226,10 +262,15 @@ function delegate(command, args) {
   process.exit(result.status ?? 1);
 }
 
-const opts = parseArgs(process.argv.slice(2));
-const [command, ...rest] = opts._;
-if (opts.version) console.log(version);
-else if (opts.help || !command) console.log(HELP);
-else if (command === 'init' || command === 'update') init(opts);
-else if (['status', 'new', 'doctor'].includes(command)) delegate(command, rest);
-else fail(`Unknown command: ${command}\n\n${HELP}`);
+const RUNTIME = ['status', 'new', 'use', 'list', 'log', 'check', 'doctor'];
+if (RUNTIME.includes(process.argv[2])) {
+  // Runtime commands have their own options; pass everything through untouched.
+  delegate(process.argv[2], process.argv.slice(3));
+} else {
+  const opts = parseArgs(process.argv.slice(2));
+  const [command] = opts._;
+  if (opts.version) console.log(version);
+  else if (opts.help || !command) console.log(HELP);
+  else if (command === 'init' || command === 'update') init(opts);
+  else fail(`Unknown command: ${command}\n\n${HELP}`);
+}

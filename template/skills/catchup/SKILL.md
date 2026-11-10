@@ -7,11 +7,12 @@ description: Rebuild working context at the start of a session or after a gap, f
 
 Goal: know what is in flight and what to do next. Change nothing except the drift fixes in step 4.
 
-1. Run `node {{DIR}}/.kit/kit.mjs status`. Read `{{DIR}}/STATE.md` and the last ten entries of `{{DIR}}/DECISIONS.md`.
+1. Run `node {{DIR}}/.kit/kit.mjs status`. Read `{{DIR}}/STATE.md`, `{{DIR}}/PROJECT.md`, and the last ten entries of `{{DIR}}/DECISIONS.md`. Run `node {{DIR}}/.kit/kit.mjs log` to see what the last sessions did, possibly in another tool.
 2. Run `git status -sb` and `git log -10 --oneline`. Uncommitted files are unfinished work from the last session; `git diff --stat` shows what it was.
 3. Open the active feature's `tasks.md` (folder name in `{{DIR}}/features/ACTIVE`). Find the first unticked task and its phase. Read `spec.md` or `plan.md` only for the part that task needs.
 4. Compare the sources. Git history wins over `tasks.md`, and `tasks.md` wins over `STATE.md`. Correct `STATE.md` and `ACTIVE` to match, and tell the user what you corrected.
    - If `STATE.md` is still the install placeholder, fill it in now from what you found.
+   - If `PROJECT.md` still has "(not filled in)" sections, say so and offer to run the `onboard` skill.
 5. Report in the user's language, in this order:
    - Where things stand: branch, feature, stage, tasks done out of total.
    - Unfinished work: uncommitted changes and what they appear to be.

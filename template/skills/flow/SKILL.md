@@ -11,8 +11,13 @@ You are the router for this project's workflow. You decide which stage the work 
 
 Run `node {{DIR}}/.kit/kit.mjs status`. It prints the active feature and its stage.
 
-- The user describes something new, or there is no active feature: run `node {{DIR}}/.kit/kit.mjs new <short-slug>`, then start at **spec**.
+- The user describes something new: run `node {{DIR}}/.kit/kit.mjs new <short-slug>`, then start at **spec**.
+- The user asks for the next piece of work without naming it: take the first item under "Next" in `{{DIR}}/ROADMAP.md`, confirm it with the user, then start it the same way and move its line to "Now".
+- The user names an existing feature: `node {{DIR}}/.kit/kit.mjs use <name>` (`list` shows them all).
 - Otherwise continue the active feature at the stage the status reports.
+- `{{DIR}}/PROJECT.md` still has "(not filled in)" sections: run the `onboard` skill first. Specs and plans written without project knowledge get the conventions wrong.
+
+A request that changes a few lines and needs no design (a typo, a small bug with an obvious cause) does not need a feature folder. Do it, run the checks, and record it at handoff.
 
 | Stage | Entered when | Produces | Leaves when |
 |---|---|---|---|
@@ -49,10 +54,10 @@ With no specialised skill, work from the template and the stage notes below.
 ## 3. Stage notes
 
 - **spec**: describe user-visible behaviour and how each story is accepted. No implementation detail. Ask the user at most five questions, the ones whose answers change the design; record anything still open as `[NEEDS CLARIFICATION: ...]`.
-- **plan**: read the code the feature touches before writing. Name real files. Check the plan against the project rules in `AGENTS.md` and list every exception with its reason.
-- **tasks**: each task is one reviewable change with its file path. Order by dependency, group into phases that each leave something usable, and end with a verification phase.
-- **implement**: take tasks in order. After each one, run its check, then tick it. If a task turns out wrong or missing, fix `tasks.md` first, then the code.
-- **verify**: run the checks from `plan.md`. Write `review.md` with each command, its result, and anything not checked. A failing check goes back to **implement** as a new task.
+- **plan**: read the context map rows in `{{DIR}}/PROJECT.md` for every area the feature touches, then the code itself, before writing. Name real files. Check the plan against the enforced rules in `PROJECT.md` and `AGENTS.md`, and list every exception with its reason.
+- **tasks**: each task is one reviewable change with its file path. Order by dependency, group into phases that each leave something usable, and end with a verification phase. For a large feature, keep each phase small enough to finish and commit in one session.
+- **implement**: take tasks in order. After each one, run its check, then tick it. If a task turns out wrong or missing, fix `tasks.md` first, then the code. At the end of each phase run `node {{DIR}}/.kit/kit.mjs check`, then the `handoff` skill, and commit.
+- **verify**: run `node {{DIR}}/.kit/kit.mjs check` and the feature-specific checks from `plan.md`. Write `review.md` with each command, its result, each accepted-when line from `spec.md` and whether it holds, and anything not checked. A failing check goes back to **implement** as a new task. When the feature is done, remove its line from `{{DIR}}/ROADMAP.md`.
 
 ## 4. Report
 
